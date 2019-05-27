@@ -1,5 +1,8 @@
 # dnsupdater
-Aliyun dynamic domain name refresher
+Aliyun dynamic domain name refresher,with getipd server side source code.
+
+用于阿里云的动态域名解析完整方案，包含域名刷新客户端，getip服务器端（用Ｃ与ＰＨＰ两种语言进行了实现）源代码。
+基本上无需任何修改，即可用于实际工作当中。
 
 用于进行动态域名解析的实现<br/>
 
