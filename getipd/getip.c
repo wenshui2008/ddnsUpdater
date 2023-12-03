@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
+#include <time.h>
 #ifdef WIN32
 #include <WinSock2.h>
 #include <WS2tcpip.h>
@@ -11,28 +12,24 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
+
 #define closesocket(s) close(s)
 #endif
 
 
+#define MAX_WAIT_TIMEOUT 10  // seconds
+
 #define MYPORT 8198    // the port users will be connecting to
 
-#define BACKLOG 5     // how many pending connections queue will hold
+#define BACKLOG 10     // how many pending connections queue will hold
 
 #define BUF_SIZE 512
 
 int fd_A[BACKLOG];    // accepted connection fd
-int conn_amount = 0;    // current connection amount
+time_t fd_A_time[BACKLOG]; // accepted connection fd time
 
-void showclient()
-{
-	int i;
-	printf("client amount: %d\n", conn_amount);
-	for (i = 0; i < BACKLOG; i++) {
-		printf("[%d]:%d  ", i, fd_A[i]);
-	}
-	printf("\n\n");
-}
+int conn_amount = 0;    // current connection amount
 
 const char * g_app_dir	= NULL;
 const char * g_exe_name = "getipd";
@@ -56,6 +53,7 @@ int		g_app_dir_len = 0;
 #endif
 
 char g_cur_exe_path[MAX_PATH];
+char g_log_file[MAX_PATH];
 
 void getExePath()
 {
@@ -78,6 +76,8 @@ void getExePath()
 #endif
 	g_app_dir = g_cur_exe_path;
 	g_app_dir_len = strlen(g_app_dir);
+	memcpy(g_log_file, g_app_dir, g_app_dir_len);
+	strcpy(g_log_file + g_app_dir_len, "getipd.log");
 }
 
 #ifdef _WIN32
@@ -135,14 +135,53 @@ void Usage()
 	exit(1);
 }
 
+int b_daemon = 0;
+int b_listClients = 0;
+
+void showClients()
+{
+	int i;
+	
+	if (b_daemon || !b_listClients)
+		return;
+		
+	printf("client amount: %d\n", conn_amount);
+	for (i = 0; i < BACKLOG; i++) {
+		printf("[%d]:%d  ", i, fd_A[i]);
+	}
+	printf("\n\n");
+}
+
+void saveOverflowLog(const char * clientIp)
+{
+	FILE * fp;
+	
+	fp = fopen(g_log_file, "wb");
+	if (fp) {
+		time_t t = time(NULL);
+		struct tm * local = localtime(&t);
+		char buf[1024];
+		int len;
+		
+		len = sprintf(buf, "[%d-%d-%d %d:%d:%d] client IP:%s\n", local->tm_year+1900, local->tm_mon+1, local->tm_mday, 
+												 local->tm_hour, local->tm_min, local->tm_sec,
+												 clientIp);
+		
+		fwrite(buf,1, len, fp);
+		
+		fclose(fp);
+	}
+}
+
 int main(int argc,char * argv[])
 {
 	int sock_fd, new_fd;  // listen on sock_fd, new connection on new_fd
 	struct sockaddr_in server_addr;    // server address information
 	struct sockaddr_in client_addr; // connector's address information
 	socklen_t sin_size;
-	int yes = 1,b_daemon = 0;
+	int yes = 1;
 	char buf[BUF_SIZE];
+	char ipAddr[128];
 	int ret;
 	int i;
 	
@@ -184,6 +223,10 @@ int main(int argc,char * argv[])
 			b_daemon = 1;
 			break;
 		}
+		else if (!strcmp(argv[i],"-l")) {
+			b_listClients = 1;
+			break;
+		}
 		else if (!strcmp(argv[i],"-?") || !strcmp(argv[i],"-h")) {
 			Usage();
 			break;
@@ -219,7 +262,9 @@ int main(int argc,char * argv[])
 		exit(1);
 	}
 
-	printf("listen port %d\n", MYPORT);
+	if (!b_daemon) {
+		printf("listen port %d\n", MYPORT);
+	}
 	
 	conn_amount = 0;
 	sin_size = sizeof(client_addr);
@@ -229,7 +274,7 @@ int main(int argc,char * argv[])
 	
 	while (1) {
 		// timeout setting
-		tv.tv_sec = 30;
+		tv.tv_sec = MAX_WAIT_TIMEOUT;
 		tv.tv_usec = 0;
 
 		// initialize file descriptor set
@@ -248,55 +293,108 @@ int main(int argc,char * argv[])
 			perror("select");
 			break;
 		} else if (ret == 0) {
-			printf("timeout\n");
-			continue;
+			if (!b_daemon) {
+				printf("select %d sockets timeout\n", conn_amount);
+			}
+			if (conn_amount == 0)
+				continue;
 		}
 
 		remove_count = 0;
-
+		
 		// check every fd in the set
 		for (i = 0; i < conn_amount; i++) {
 			if (FD_ISSET(fd_A[i], &fdsr)) {
 				ret = recv(fd_A[i], buf, sizeof(buf), 0);
 				if (ret <= 0) {        // client close
-					printf("client[%d] close\n", i);
+					if (!b_daemon) {
+						printf("client[%d] close\n", i);
+					}
 					closesocket(fd_A[i]);
 					FD_CLR(fd_A[i], &fdsr);
 					fd_A[i] = 0;
-					remove_count ++;
+					remove_count++;
 				} else {        // receive data
 					int ret2;
-					char ipAddr[128];
-
+					
 					if (ret < BUF_SIZE)
 						memset(&buf[ret], '\0', 1);
-					printf("client[%d] send:%s\n", i, buf);
+					if (!b_daemon) {
+						printf("client[%d] send:%s\n", i, buf);
+					}
 
 					sin_size = sizeof(client_addr);
 
 					ret2 = getpeername(fd_A[i],(struct sockaddr *)&client_addr, &sin_size);
 
 					if (ret2 == 0) {
-						int len = sprintf(buf,"{\"ip\":\"%s\"}", inet_ntop(AF_INET, &client_addr.sin_addr, ipAddr, sizeof(ipAddr)));
+						if (client_addr.sin_family == AF_INET) {
+							int len = sprintf(buf,"{\"ip\":\"%s\"}", inet_ntop(AF_INET, &client_addr.sin_addr, ipAddr, sizeof(ipAddr)));
 
-						send(fd_A[i], buf, len, 0);
+							send(fd_A[i], buf, len, 0);
 
-						remove_count ++;
+							remove_count++;
 
-						closesocket(fd_A[i]);
+							closesocket(fd_A[i]);
 
-						FD_CLR(fd_A[i], &fdsr);
-						fd_A[i] = 0;
+							FD_CLR(fd_A[i], &fdsr);
+							fd_A[i] = 0;
+						}
+					}
+					else {
+						printf("getpeername failed: %d\n", ret2);
 					}
 				}
 			}
 		}
+		
+		//check client timeout
+		if (conn_amount > 0) {
+			time_t now = time(NULL);
+			
+			for (i = 0; i < conn_amount; i++) {
+				if (fd_A[i]) {
+					time_t time_out = now - fd_A_time[i];
+					
+					if (time_out > MAX_WAIT_TIMEOUT) {
+						
+						if (!b_daemon) {
+							
+							struct tm * local = localtime(&fd_A_time[i]);
+							char time_buf[64];
+							int len;
+							
+							len = sprintf(time_buf, "%d-%d-%d %d:%d:%d", local->tm_year+1900, local->tm_mon+1, local->tm_mday, 
+																	 local->tm_hour, local->tm_min, local->tm_sec);
+												 
+							sin_size = sizeof(client_addr);
+
+							getpeername(fd_A[i],(struct sockaddr *)&client_addr, &sin_size);
+							inet_ntop(AF_INET, &client_addr.sin_addr, ipAddr, sizeof(ipAddr));
+							
+					
+							printf("client[%d]:%d %s from: %s timeout:%d seconds\n", i, fd_A[i], ipAddr, time_buf, (int) time_out);
+						}
+						
+						send(fd_A[i], "timeout", 7, 0);
+						closesocket(fd_A[i]);
+						
+						fd_A[i] = 0;
+						
+						remove_count++;
+					}
+				}
+			}
+		}
+		
 		//resort the socket
 		if (remove_count > 0) {
 			int j=0;
+			
 			for (i = 0; i < conn_amount; i++) {
 				if (fd_A[i]) {
 					fd_A[j] = fd_A[i];
+					fd_A_time[j] = fd_A_time[i];
 					j++;
 				}
 			}
@@ -308,35 +406,42 @@ int main(int argc,char * argv[])
 			conn_amount -= remove_count;
 		}
 
-
 		// check whether a new connection comes
 		if (FD_ISSET(sock_fd, &fdsr)) {
+			char ipAddr[128];
+			const char * sIpAddr;
+			
 			new_fd = accept(sock_fd, (struct sockaddr *)&client_addr, &sin_size);
 			if (new_fd <= 0) {
 				perror("accept");
 				continue;
 			}
 
+			sIpAddr = inet_ntop(AF_INET, &client_addr.sin_addr, ipAddr, sizeof(ipAddr));
 			// add to fd queue
 			if (conn_amount < BACKLOG) {
-				char ipAddr[128];
 
+				fd_A_time[conn_amount] = time(NULL);
 				fd_A[conn_amount++] = new_fd;
 
-				printf("new connection client[%d] %s:%d\n", conn_amount,
-					inet_ntop(AF_INET, &client_addr.sin_addr, ipAddr, sizeof(ipAddr)), ntohs(client_addr.sin_port));
+				if (!b_daemon) {
+					printf("new connection client[%d] %s:%d\n", conn_amount, sIpAddr, ntohs(client_addr.sin_port));
+				}
 				if (new_fd > maxsock)
 					maxsock = new_fd;
 			}
 			else {
-				printf("max connections arrived, exit\n");
+				saveOverflowLog(sIpAddr);
+				
+				if (!b_daemon) {
+					printf("max connections arrived, close the client\n");
+				}
 				send(new_fd, "bye", 3, 0);
 				closesocket(new_fd);
-				break;
 			}
 		}
 				
-		showclient();
+		showClients();
 	}
 
 	// close other connections
