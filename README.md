@@ -8,9 +8,9 @@ Aliyun dynamic domain name refresher,with getipd server side source code.
 
 用于进行动态域名解析的实现<br/>
 
-dnsupdate.php - 客户端程序,放在动态IP地址的机器上或者经由动态IP地址的路由器内部计算器上。<br/>
-php dnsupdate.php
-如果要隐藏控制台，请运行 startdnsupdater.bat 程序<br/>
+dnsupdate.php - 客户端程序,放在动态IP地址的机器上或者经由动态IP地址的路由器内部计算器上。执行：<br/>
+php dnsupdate.php<br/>
+如果要隐藏控制台，请运行 程序 <br/>startdnsupdater.bat<br/>
 <b>注意：</b> 需要正确安装PHP解释器
 
 getip.php -用于获取公网IP的助手程序的php实现，放在公网上其它任何一台服务器上，帮助反馈动态IP地址<br/>
