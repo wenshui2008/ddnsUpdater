@@ -6,7 +6,7 @@ Aliyun dynamic domain name refresher,with getipd server side source code.
 用于阿里云的动态域名解析完整方案，包含域名刷新客户端，帮助获取公网IP的getipd服务器端（用Ｃ与ＰＨＰ两种语言进行了实现）源代码。
 基本上无需任何修改，即可用于实际工作当中。
 
-用于进行动态域名解析的实现<br/>
+###用于进行动态域名解析的实现<br/>
 
 dnsupdate.php - 客户端程序,放在动态IP地址的机器上或者经由动态IP地址的路由器内部计算器上。执行：<br/>
 php dnsupdate.php<br/>
@@ -18,7 +18,7 @@ getip.php -用于获取公网IP的助手程序的php实现，放在公网上其�
 getipd 目录下为 用于获取公网IP的助手程序 C实现。编译后放在公网上一台服务器上。<br/>
 PHP实现与C实现2选1即可，那个方便用那个。<br/>
 
-C实现的编译：<br/>
+##C实现的编译：<br/>
 <b>Windows下用VC打开 .sln文件即可</b><br/>
 <br/>
 <b>Linux 下用如下命令编译</b>：<br/>
