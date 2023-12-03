@@ -1,4 +1,4 @@
-# dnsupdater
+# ddnsUpdater - 简单的动态域名刷新器
 Aliyun dynamic domain name refresher,with getipd server side source code.
 
 用于支持公网IP地址为动态分配地址，域名固定，IP地址可以不固定，通过固定域名访问资源的解决方案。
